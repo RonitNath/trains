@@ -1,6 +1,9 @@
 use std::f32::consts::PI;
 
-use crate::{ prelude::*, logic::body::{ BodyBundle, Body } };
+use crate::{
+    prelude::*,
+    logic::{ body::{ BodyBundle, Body }, spawning::spawn, sk::SpatialKnowledge },
+};
 
 use super::{ assets::GeneratedAssets, Tag };
 
@@ -12,7 +15,12 @@ impl Plugin for AgentPlugin {
             .register_type::<Stamina>()
             .register_type::<Agent>()
             .add_event::<S1>()
-            .add_systems(Update, (handle_s1.after(decide), decide, gain_stamina));
+            .add_systems(Update, (
+                handle_s1.after(decide),
+                decide.after(vision),
+                vision,
+                gain_stamina,
+            ));
     }
 }
 
@@ -39,6 +47,79 @@ pub struct S1 {
 pub enum Action {
     M(Movement),
     G(Goal),
+    SpawnChild,
+    ProcessVision,
+}
+
+#[derive(Component)]
+pub struct Vision {
+    pub toi: f32,
+    pub fov: f32,
+    pub half_cone_count: isize,
+    pub seeing: HashMap<Entity, Vec<Vec2>>,
+}
+
+impl Vision {
+    pub fn new(toi: f32, fov: f32, half_cone_count: isize) -> Self {
+        Self {
+            toi,
+            fov,
+            half_cone_count,
+            seeing: HashMap::new(),
+        }
+    }
+}
+
+/// Casts rays in a cone in front of the agent
+/// and reports what it sees to the SpatialKnowledge
+///
+/// Next: report about tiles which you see and which no longer are occupied
+pub fn vision(
+    mut agents: Query<(Entity, &Transform, &mut Vision, &Body, &Agent)>,
+    rc: Res<RapierContext>,
+    mut gizmos: Gizmos,
+    mut stage_1: EventWriter<S1>
+) {
+    for (entity, tf, mut vision, body, agent) in agents.iter_mut() {
+        let my_pos = tf.translation.truncate();
+        let my_facing = tf.local_y().truncate();
+
+        let mut seeing: HashMap<Entity, Vec<Vec2>> = HashMap::new();
+
+        let right_extent = vision.fov;
+        let step_size = right_extent / (vision.half_cone_count as f32);
+        let angles = (-vision.half_cone_count..=vision.half_cone_count)
+            .map(|i| (i as f32) * step_size)
+            .collect::<Vec<_>>();
+
+        angles.iter().for_each(|angle| {
+            let dir = Vec2::from_angle(*angle).rotate(my_facing);
+            let mut dist = vision.toi * facing_debuff(my_facing, dir);
+            if
+                let Some((ix, f_dist)) = rc.cast_ray(
+                    my_pos,
+                    dir,
+                    dist,
+                    false,
+                    QueryFilter::default().exclude_collider(entity)
+                )
+            {
+                dist = f_dist;
+                let hit_pos = my_pos + dir * dist;
+                seeing.entry(ix).or_default().push(hit_pos);
+            }
+
+            gizmos.ray_2d(my_pos, dir * dist, Color::BLACK);
+        });
+
+        if !seeing.is_empty() {
+            stage_1.send(S1 {
+                id: entity,
+                action: Action::ProcessVision,
+            });
+        }
+        vision.seeing = seeing;
+    }
 }
 
 pub fn decide(
@@ -47,12 +128,8 @@ pub fn decide(
     mut gizmos: Gizmos
 ) {
     for (e, tf, body, agent, stamina, goal) in agents.iter() {
-        let mut can_move = true;
         let my_pos = tf.translation.truncate();
         let my_facing = tf.local_y().truncate();
-        if stamina.energy < 0.5 {
-            can_move = false;
-        }
 
         match goal.mission {
             Missions::None => {
@@ -86,15 +163,23 @@ pub fn decide(
 
 pub fn handle_s1(
     mut rdr: EventReader<S1>,
-    mut q: Query<(&Transform, &mut Velocity, &Body, &mut Stamina, &mut Goal)>,
-    time: Res<Time>
+    mut q: Query<
+        (&Transform, &mut Velocity, &Body, &mut Stamina, &mut Goal, &mut SpatialKnowledge, &Vision)
+    >,
+    time: Res<Time>,
+    rc: Res<RapierContext>,
+    mut commands: Commands,
+    ga: Res<GeneratedAssets>
 ) {
     for e in rdr.iter() {
-        if let Ok((tf, mut vel, body, mut stamina, mut goal)) = q.get_mut(e.id) {
+        if let Ok((tf, mut vel, body, mut stamina, mut goal, mut sk, vision)) = q.get_mut(e.id) {
+            let my_pos = tf.translation.truncate();
+            let my_facing = tf.local_y().truncate();
+
             use Action::*;
             match e.action {
                 M(Movement::Rotate(dir)) => {
-                    let amt = tf.local_y().truncate().angle_between(dir) / PI;
+                    let amt = my_facing.angle_between(dir) / PI;
                     if stamina.energy > 0.1 {
                         vel.angvel += amt * body.angvel() * time.delta_seconds();
 
@@ -103,7 +188,6 @@ pub fn handle_s1(
                 }
                 M(Movement::Move(pos)) => {
                     if stamina.energy > 0.5 {
-                        let my_pos = tf.translation.truncate();
                         let dir = (pos - my_pos).normalize_or_zero();
                         // let str = my_pos.distance(pos) / body.radius;
                         vel.linvel +=
@@ -117,6 +201,24 @@ pub fn handle_s1(
                 }
                 G(g) => {
                     *goal = g;
+                }
+                SpawnChild => {
+                    let spawn_pos = my_pos + my_facing * body.radius * 2.01;
+
+                    if spawn(RADIUS, spawn_pos, None, &rc) {
+                        Agent::spawn(
+                            spawn_pos,
+                            my_facing.rotate(Vec2::NEG_Y),
+                            "WHITE".to_string(),
+                            &mut commands,
+                            &ga
+                        );
+                    } else {
+                        warn!("Spot not open for spawning");
+                    }
+                }
+                ProcessVision => {
+                    sk.report(&vision.seeing);
                 }
             };
         } else {
@@ -144,6 +246,8 @@ pub struct AgentBundle {
     agent: Agent,
     stamina: Stamina,
     goal: Goal,
+    vision: Vision,
+    sk: SpatialKnowledge,
 }
 
 #[derive(Reflect, Component, Clone, Copy)]
@@ -177,6 +281,8 @@ impl AgentBundle {
             agent: Agent,
             stamina: Stamina::new(1.0),
             goal: Goal::new(),
+            vision: Vision::new(RADIUS * VISION_SCALAR, FOV, HALF_CONES),
+            sk: SpatialKnowledge::new(RADIUS / 2.0),
         }
     }
 }

@@ -1,8 +1,14 @@
+use std::f32::consts::PI;
+
 pub const AGENT_INV_SIZE: usize = 4;
 pub const BASE_INV_SIZE: usize = 100;
 
 pub const RADIUS: f32 = 50.0;
 pub const EYEBALL_SCALAR: f32 = 0.15;
+
+pub const VISION_SCALAR: f32 = 10.0;
+pub const FOV: f32 = PI / 2.0;
+pub const HALF_CONES: isize = 7;
 
 pub const VISIBLE_Z: f32 = -1.0;
 pub const CHILD_VISIBLE_Z: f32 = 0.5;

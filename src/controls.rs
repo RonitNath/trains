@@ -140,7 +140,8 @@ pub fn mouse_selection(
     agents: Query<Entity, With<Agent>>,
     mut commands: Commands,
     keys: Res<Input<KeyCode>>,
-    mut sp: ResMut<SelectedPos>
+    mut sp: ResMut<SelectedPos>,
+    mut ac: ResMut<ActiveControl>
 ) {
     if mouse_button_input.pressed(MouseButton::Left) {
         let window = windows.get_single().unwrap();
@@ -174,9 +175,7 @@ pub fn mouse_selection(
             gui_select.add(entity);
             if keys.pressed(KeyCode::ControlLeft) {
                 if let Ok(entity) = agents.get(entity) {
-                    if let Some(mut ec) = commands.get_entity(entity) {
-                        ec.insert(ActiveControl);
-                    }
+                    ac.0 = Some(entity.clone());
                 }
             }
             true

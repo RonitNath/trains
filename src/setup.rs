@@ -66,9 +66,7 @@ fn frame_time(
     mut timer: Local<Stopwatch>,
     mut frame_datapoints: Local<Vec<f64>>,
     mut latest_average: Local<f64>,
-    mut datapoints: Local<Vec<[f64; 2]>>,
-    mut game_control: ResMut<GameControl>,
-    mut camera_mover: EventWriter<MoveCamera>
+    mut datapoints: Local<Vec<[f64; 2]>>
 ) {
     timer.tick(time.delta());
     frame_datapoints.push(time.delta_seconds_f64());
@@ -76,8 +74,6 @@ fn frame_time(
 
     if timer.elapsed_secs() > 1.0 {
         let average = frame_datapoints.iter().sum::<f64>() / (frame_datapoints.len() as f64);
-        // round to 3 sig figs
-
         datapoints.push([time.elapsed_seconds_f64(), 1.0 / average]);
         *latest_average = average;
         timer.reset();
@@ -87,15 +83,12 @@ fn frame_time(
     egui::Window
         ::new("Stats")
         .default_size([100.0, 200.0])
+        .default_pos([0.0, -1000.0])
         .default_open(false)
         .show(contexts.ctx_mut(), |ui| {
             let time_since_start = time.elapsed_seconds_f64();
             let fps = 1.0 / *latest_average;
             ui.label(format!("Second {:.*}:\tFrame time: {:.*}", 0, time_since_start, 5, fps));
-
-            if ui.button("Toggle spawning").clicked() {
-                game_control.spawn_more = !game_control.spawn_more;
-            }
         });
 }
 

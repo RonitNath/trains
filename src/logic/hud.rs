@@ -2,18 +2,21 @@ use bevy_egui::{ egui, EguiContexts };
 
 use crate::{ prelude::*, world::agent::{ Agent, S1, Movement, Action, Goal } };
 
+use super::sk::SpatialKnowledge;
+
 pub struct HudPlugin;
 
 impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CameraFollows>()
             .init_resource::<SelectedPos>()
+            .init_resource::<ActiveControl>()
             .add_systems(Update, display);
     }
 }
 
-#[derive(Component)]
-pub struct ActiveControl;
+#[derive(Resource, Default)]
+pub struct ActiveControl(pub Option<Entity>);
 
 #[derive(Resource, Default, Deref, DerefMut)]
 pub struct CameraFollows(pub Option<Entity>);
@@ -22,44 +25,29 @@ pub struct CameraFollows(pub Option<Entity>);
 pub struct SelectedPos(pub Option<Vec2>);
 
 pub fn display(
-    ac: Query<(Entity, &Agent), With<ActiveControl>>,
     mut contexts: EguiContexts,
-    mut selected_agent: Local<Option<Entity>>,
-    mut display_map: Local<bool>,
+    mut display: Local<HashSet<String>>,
     mut camera_follows: ResMut<CameraFollows>,
     keys: Res<Input<KeyCode>>,
+    sp: Res<SelectedPos>,
     mut s1_wtr: EventWriter<S1>,
-    sp: Res<SelectedPos>
+    mut ac: ResMut<ActiveControl>,
+    sks: Query<&SpatialKnowledge>,
+    mut gizmos: Gizmos
 ) {
     // let mut agent = None;
 
-    let mut agents = vec![];
-    for (e, agent) in ac.iter() {
-        agents.push((e, agent));
-    }
-
     egui::Window::new("Active Control").show(contexts.ctx_mut(), |ui| {
-        match *selected_agent {
+        match ac.0 {
             None => {
-                match agents.len() {
-                    0 => {
-                        ui.label("Select an agent");
-                    }
-                    1 => {
-                        ui.label("1 agent selected");
-                        *selected_agent = Some(agents[0].0);
-                    }
-                    n => {
-                        for agent in agents.iter() {
-                            if ui.button(format!("Select agent {:?}", agent.0)).clicked() {
-                                *selected_agent = Some(agent.0);
-                            }
-                        }
-                    }
-                }
+                ui.label("Select an agent");
             }
             Some(e) => {
                 ui.label(format!("Selected agent {:?}", e));
+                if ui.button("Deselect").clicked() {
+                    ac.0 = None;
+                    return;
+                }
                 match camera_follows.0 {
                     None => {
                         if ui.button("Follow agent").clicked() {
@@ -84,6 +72,13 @@ pub fn display(
                     }
                 }
 
+                if ui.button("Spawn Child").clicked() {
+                    s1_wtr.send(S1 {
+                        id: e,
+                        action: Action::SpawnChild,
+                    });
+                }
+
                 match sp.0 {
                     Some(pos) => {
                         if
@@ -101,15 +96,48 @@ pub fn display(
                     }
                 }
 
-                match *display_map {
+                match display.contains(&"map".to_string()) {
                     true => {
                         if ui.button("Hide map").clicked() {
-                            *display_map = false;
+                            display.remove(&"map".to_string());
+                        }
+                        if let Ok(sk) = sks.get(e) {
+                            let occupied = sk.get_occupied();
+                            let mut c = 0;
+                            let display_tiles = match display.contains(&"tiles".to_string()) {
+                                true => {
+                                    if ui.button("Hide tiles").clicked() {
+                                        display.remove(&"tiles".to_string());
+                                    }
+                                    true
+                                }
+                                false => {
+                                    if ui.button("Display tiles").clicked() {
+                                        display.insert("tiles".to_string());
+                                    }
+                                    false
+                                }
+                            };
+                            for grid in occupied.iter() {
+                                c += 1;
+                                let pos = sk.pos(*grid);
+
+                                if display_tiles {
+                                    for entity in sk.tile(grid).iter() {
+                                        ui.label(format!("{:?} contains {entity:?}", grid));
+                                    }
+                                }
+
+                                gizmos.circle_2d(pos, sk.tile_size / 2.0, Color::BLUE);
+                            }
+                            ui.label(format!("{} tiles occupied", c));
+                        } else {
+                            ui.label("No spatial knowledge");
                         }
                     }
                     false => {
                         if ui.button("Display map").clicked() {
-                            *display_map = true;
+                            display.insert("map".to_string());
                         }
                     }
                 }
