@@ -424,3 +424,9 @@ impl Grid {
         neighbors
     }
 }
+
+pub fn facing_debuff(facing: Vec2, desired_dir: Vec2) -> f32 {
+    let angle_diff = facing.angle_between(desired_dir);
+    let x = angle_diff.abs();
+    (2.0 * x).cos() / 4.0 + (0.5 * x).cos() / 4.0 + 0.5
+}

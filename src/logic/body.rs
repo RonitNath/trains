@@ -1,3 +1,5 @@
+use std::f32::consts::PI;
+
 use bevy::sprite::Mesh2dHandle;
 
 use crate::prelude::*;
@@ -11,6 +13,14 @@ pub struct Body {
 impl Body {
     pub fn new(radius: f32, color: Color) -> Self {
         Self { radius, color }
+    }
+
+    pub fn lin_margin(&self) -> f32 {
+        self.radius
+    }
+
+    pub fn ang_margin(&self) -> f32 {
+        PI / self.radius
     }
 
     pub fn linvel(&self) -> f32 {

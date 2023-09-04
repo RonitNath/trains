@@ -7,7 +7,7 @@ use crate::{
     prelude::*,
     setup::MoveCamera,
     world::agent::Agent,
-    logic::hud::{ ActiveControl, CameraFollows },
+    logic::hud::{ ActiveControl, CameraFollows, SelectedPos },
 };
 
 pub struct ControlsPlugin;
@@ -40,13 +40,6 @@ impl Plugin for ControlsPlugin {
 fn camera_commands(
     keys: Res<Input<KeyCode>>,
     mut query: Query<(&mut Transform, &mut OrthographicProjection, With<Camera>)>,
-    // mut active_control: Query<
-    // (Entity, &mut ExternalImpulse, &Transform, &Agent, With<ActiveControl>, Without<Camera>)
-    // >,
-    mut commands: Commands,
-    // mut movement_wtr: EventWriter<Movement>,
-    time: Res<Time>,
-    // mut body_controller: EventWriter<BodyControlEvent>,
     mut camera_moved: EventReader<MoveCamera>,
     camera_follow: Res<CameraFollows>,
     agents: Query<&Transform, (With<Agent>, Without<Camera>)>
@@ -110,84 +103,6 @@ fn camera_commands(
                 camera_tf.translation.y += y * proj.scale * camera_scalar;
             }
         }
-
-        // match active_control.iter_mut().next() {
-        //     Some((ac_entity, _xi, ac_tf, _agent, (), ())) => {
-        //         let facing = ac_tf.local_y().truncate();
-
-        //         action_cooldown.tick(time.delta());
-
-        //         if keys.pressed(KeyCode::Q) {
-        //             r += 1.0;
-        //             pressed = true;
-        //         }
-        //         if keys.pressed(KeyCode::E) {
-        //             r -= 1.0;
-        //             pressed = true;
-        //         }
-        //         if keys.pressed(KeyCode::Z) {
-        //             x = 0.0;
-        //             y = 0.0;
-        //             r = 0.0;
-        //             pressed = true;
-        //         }
-        //         if keys.pressed(KeyCode::X) {
-        //             if let Some(mut ec) = commands.get_entity(ac_entity) {
-        //                 ec.remove::<ActiveControl>();
-        //             }
-        //         }
-
-        //         use BodyControlEvent as BCE;
-        //         let mut mvmt = None;
-
-        //         if keys.just_pressed(KeyCode::J) {
-        //             mvmt = Some(BCE::left_punch(ac_entity));
-        //             pressed = true;
-        //         }
-
-        //         if keys.just_pressed(KeyCode::K) {
-        //             mvmt = Some(BCE::right_punch(ac_entity));
-        //             pressed = true;
-        //         }
-
-        //         if keys.just_pressed(KeyCode::H) {
-        //             mvmt = Some(BCE::toggle_hands(ac_entity));
-        //             pressed = true;
-        //         }
-
-        //         if pressed {
-        //             if x != 0.0 || y != 0.0 {
-        //                 // let angle = Vec2::Y.angle_between(facing);
-        //                 // let impulse_dir = Vec2::from_angle(angle).rotate(Vec2::new(x, y));
-        //                 // xi.impulse += impulse_dir * agent.one_step_impulse();
-        //                 mvmt = Some(BCE::r#move(ac_entity, facing.rotate(Vec2::new(y, -x)), 1.0));
-        //             }
-        //             if r != 0.0 {
-        //                 // each press is turning 12.5 degrees in a direction
-        //                 // xi.torque_impulse += (agent.full_turn_torque() / 2.0) * r;
-        //                 mvmt = Some(
-        //                     BCE::rotate(ac_entity, facing.rotate(Vec2::from_angle(r)), 0.125)
-        //                 );
-        //             }
-        //             // if action_cooldown.elapsed_secs() > 0.5 {
-        //             if let Some(mvmt) = mvmt {
-        //                 body_controller.send(mvmt);
-        //             }
-        //             // }
-        //             // action_cooldown.reset();
-        //         }
-
-        //         let cam_z = camera_tf.translation.z;
-        //         camera_tf.translation = ac_tf.translation;
-        //         camera_tf.translation = ac_tf.translation;
-        //         camera_tf.translation.z = cam_z;
-        //     }
-        //     None => {
-        //         if pressed {
-        //
-        //         }
-        //     }
-        // }
     }
 }
 
@@ -224,7 +139,8 @@ pub fn mouse_selection(
     mut gizmos: Gizmos,
     agents: Query<Entity, With<Agent>>,
     mut commands: Commands,
-    keys: Res<Input<KeyCode>>
+    keys: Res<Input<KeyCode>>,
+    mut sp: ResMut<SelectedPos>
 ) {
     if mouse_button_input.pressed(MouseButton::Left) {
         let window = windows.get_single().unwrap();
@@ -241,6 +157,10 @@ pub fn mouse_selection(
             window_size.y / 2.0 - mouse_pos.y
         );
         let pos = camera_pos + mouse_pos * camera_scale;
+
+        if keys.pressed(KeyCode::ControlLeft) {
+            sp.0 = Some(pos);
+        }
 
         // println!("scale: {:?}", camera_scale);
         // println!("camera: {:?}", camera_pos);
