@@ -361,13 +361,22 @@ pub fn pos(tile_size: f32, grid: Grid) -> Vec2 {
     Vec2::new(x, y)
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy, Reflect)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy, Reflect, PartialOrd, Ord)]
 pub struct Grid {
     pub x: i32,
     pub y: i32,
 }
 
 impl Grid {
+    // diagonal is 14, straight is 10
+    pub fn distance(&self, other: Grid) -> i32 {
+        let x = (self.x - other.x).abs();
+        let y = (self.y - other.y).abs();
+        let diag = x.min(y);
+        let straight = x.max(y) - diag;
+        diag * 14 + straight * 10
+    }
+
     pub fn new(x: i32, y: i32) -> Self {
         Self { x, y }
     }
@@ -404,6 +413,14 @@ impl Grid {
         Self::new(self.x + 1, self.y - 1)
     }
 
+    pub fn neighbors_by_cost(&self) -> (Vec<Self>, Vec<Self>) {
+        let ten_cost = vec![self.left(), self.right(), self.up(), self.down()];
+
+        let fourteen_cost = vec![self.q1(), self.q2(), self.q3(), self.q4()];
+
+        (ten_cost, fourteen_cost)
+    }
+
     pub fn neighbors(&self) -> Vec<Self> {
         vec![
             self.left(),
@@ -429,4 +446,27 @@ pub fn facing_debuff(facing: Vec2, desired_dir: Vec2) -> f32 {
     let angle_diff = facing.angle_between(desired_dir);
     let x = angle_diff.abs();
     (2.0 * x).cos() / 4.0 + (0.5 * x).cos() / 4.0 + 0.5
+}
+
+#[test]
+fn test_distance() {
+    let origin = Grid::new(0, 0);
+    let up = Grid::new(0, 1);
+    let right = Grid::new(1, 0);
+    let diag = Grid::new(1, 1);
+    let diag2 = Grid::new(2, 2);
+
+    let custom1 = Grid::new(1, 2);
+
+    assert_eq!(origin.distance(up), 10);
+    assert_eq!(origin.distance(right), 10);
+    assert_eq!(origin.distance(diag), 14);
+    assert_eq!(origin.distance(diag2), 28);
+
+    assert_eq!(up.distance(right), 14);
+    assert_eq!(up.distance(diag), 10);
+
+    assert_eq!(right.distance(diag), 10);
+
+    assert_eq!(origin.distance(custom1), 24);
 }

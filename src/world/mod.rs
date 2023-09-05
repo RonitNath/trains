@@ -2,7 +2,7 @@ use bevy::transform::commands;
 
 use crate::{ prelude::*, logic::body::BodyBundle };
 
-use self::{ agent::Agent, assets::{ GeneratedAssets, init_assets } };
+use self::{ agent::Agent, assets::{ GeneratedAssets, init_assets }, base::Base };
 
 pub mod agent;
 pub mod base;
@@ -27,10 +27,15 @@ pub fn initialize(
 ) {
     // Add 1 agent to the center of the world
 
-    let pos = Vec2::ZERO;
+    let pos = Vec2::NEG_Y;
     let dir = Vec2::Y;
     let color = String::from("WHITE");
     Agent::spawn(pos, dir, color, &mut commands, &assets);
+
+    let pos = Vec2::ZERO;
+    let dir = Vec2::Y;
+    let color = String::from("WHITE");
+    Base::spawn(pos, dir, color, &mut commands, &assets);
 }
 
 #[derive(Component)]
@@ -52,7 +57,9 @@ impl Tag {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum EntityKind {
     Agent,
     Base,
+    Unknown,
 }

@@ -1,6 +1,6 @@
 use bevy_egui::{ egui, EguiContexts };
 
-use crate::{ prelude::*, world::agent::{ Agent, S1, Movement, Action, Goal } };
+use crate::{ prelude::*, world::agent::{ Agent, S1, Movement, Action, Goal, Missions } };
 
 use super::sk::SpatialKnowledge;
 
@@ -32,7 +32,7 @@ pub fn display(
     sp: Res<SelectedPos>,
     mut s1_wtr: EventWriter<S1>,
     mut ac: ResMut<ActiveControl>,
-    sks: Query<&SpatialKnowledge>,
+    info: Query<(&SpatialKnowledge, &Goal, &Transform)>,
     mut gizmos: Gizmos
 ) {
     // let mut agent = None;
@@ -81,14 +81,27 @@ pub fn display(
 
                 match sp.0 {
                     Some(pos) => {
-                        if
-                            ui.button(format!("Move to {:?}", pos)).clicked() ||
-                            keys.pressed(KeyCode::M)
-                        {
-                            s1_wtr.send(S1 {
-                                id: e,
-                                action: Action::G(Goal::move_to(pos)),
-                            });
+                        if let Ok((sk, goal, tf)) = info.get(e) {
+                            let my_pos = tf.translation.truncate();
+                            if
+                                ui.button(format!("Move to {:?}", pos)).clicked() ||
+                                keys.pressed(KeyCode::M)
+                            {
+                                s1_wtr.send(S1 {
+                                    id: e,
+                                    action: Action::G(Goal::move_to(pos)),
+                                });
+                            }
+
+                            if let Missions::MoveTo(pos) = &goal.mission {
+                                let (path, b) = sk.path(my_pos, *pos);
+
+                                for pos in path.iter() {
+                                    ui.label(format!("Pathpoint: {:?}", pos));
+
+                                    gizmos.circle_2d(*pos, sk.tile_size / 2.0, Color::GREEN);
+                                }
+                            }
                         }
                     }
                     None => {
@@ -101,7 +114,8 @@ pub fn display(
                         if ui.button("Hide map").clicked() {
                             display.remove(&"map".to_string());
                         }
-                        if let Ok(sk) = sks.get(e) {
+                        if let Ok((sk, goal, tf)) = info.get(e) {
+                            let my_pos = tf.translation.truncate();
                             let occupied = sk.get_occupied();
                             let mut c = 0;
                             let display_tiles = match display.contains(&"tiles".to_string()) {
@@ -118,6 +132,19 @@ pub fn display(
                                     false
                                 }
                             };
+                            let mut num_details = 0;
+                            for info in sk.details() {
+                                num_details += 1;
+                                ui.label(format!("Info: {:?}", info));
+                            }
+                            ui.label(format!("Num details: {}", num_details));
+                            let mut num_temp = 0;
+                            for temp in sk.temp.iter() {
+                                num_temp += 1;
+                                ui.label(format!("Temp: {:?}", temp));
+                            }
+                            ui.label(format!("Num temp: {num_temp}"));
+
                             for grid in occupied.iter() {
                                 c += 1;
                                 let pos = sk.pos(*grid);

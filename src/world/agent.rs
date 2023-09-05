@@ -5,7 +5,7 @@ use crate::{
     logic::{ body::{ BodyBundle, Body }, spawning::spawn, sk::SpatialKnowledge },
 };
 
-use super::{ assets::GeneratedAssets, Tag };
+use super::{ assets::GeneratedAssets, Tag, EntityKind };
 
 pub struct AgentPlugin;
 
@@ -15,12 +15,44 @@ impl Plugin for AgentPlugin {
             .register_type::<Stamina>()
             .register_type::<Agent>()
             .add_event::<S1>()
+            .add_event::<S2>()
+            .add_event::<S3>()
             .add_systems(Update, (
+                handle_s3.after(handle_s2),
+                handle_s2.after(handle_s1),
                 handle_s1.after(decide),
                 decide.after(vision),
                 vision,
                 gain_stamina,
             ));
+    }
+}
+
+#[derive(Event)]
+pub struct S3 {
+    id: Entity,
+    event: A3,
+}
+
+pub enum A3 {
+    GainInfo {
+        about: Entity,
+        info: EntityKind,
+        pos: Vec2,
+    },
+}
+
+pub fn handle_s3(mut rdr: EventReader<S3>, mut q: Query<&mut SpatialKnowledge>) {
+    for e in rdr.iter() {
+        if let Ok(mut sk) = q.get_mut(e.id) {
+            match e.event {
+                A3::GainInfo { about, info, pos } => {
+                    sk.obtains_info_about(about, info, pos);
+                }
+            }
+        } else {
+            warn!("S3 query failed");
+        }
     }
 }
 
@@ -47,8 +79,11 @@ pub struct S1 {
 pub enum Action {
     M(Movement),
     G(Goal),
+    None,
     SpawnChild,
     ProcessVision,
+
+    PruneVision,
 }
 
 #[derive(Component)]
@@ -75,12 +110,13 @@ impl Vision {
 ///
 /// Next: report about tiles which you see and which no longer are occupied
 pub fn vision(
-    mut agents: Query<(Entity, &Transform, &mut Vision, &Body, &Agent)>,
+    mut agents: Query<(Entity, &Transform, &mut Vision, &Body, &Agent, &SpatialKnowledge)>,
     rc: Res<RapierContext>,
     mut gizmos: Gizmos,
-    mut stage_1: EventWriter<S1>
+    mut stage_1: EventWriter<S1>,
+    mut stage_2: EventWriter<S2>
 ) {
-    for (entity, tf, mut vision, body, agent) in agents.iter_mut() {
+    for (entity, tf, mut vision, body, agent, sk) in agents.iter_mut() {
         let my_pos = tf.translation.truncate();
         let my_facing = tf.local_y().truncate();
 
@@ -117,17 +153,24 @@ pub fn vision(
                 id: entity,
                 action: Action::ProcessVision,
             });
+        } else {
+            if sk.has_seen() {
+                stage_1.send(S1 {
+                    id: entity,
+                    action: Action::PruneVision,
+                });
+            }
         }
         vision.seeing = seeing;
     }
 }
 
 pub fn decide(
-    agents: Query<(Entity, &Transform, &Body, &Agent, &Stamina, &Goal)>,
+    agents: Query<(Entity, &Transform, &Body, &Agent, &Stamina, &Goal, &SpatialKnowledge)>,
     mut stage_1: EventWriter<S1>,
     mut gizmos: Gizmos
 ) {
-    for (e, tf, body, agent, stamina, goal) in agents.iter() {
+    for (e, tf, body, agent, stamina, goal, sk) in agents.iter() {
         let my_pos = tf.translation.truncate();
         let my_facing = tf.local_y().truncate();
 
@@ -135,10 +178,17 @@ pub fn decide(
             Missions::None => {
                 // None
             }
-            Missions::MoveTo(pos) => {
-                let vec = pos - my_pos;
-                let dist = vec.length();
-                let dir = vec.normalize_or_zero();
+            Missions::MoveTo(mut pos) => {
+                let (mut path, obstructed) = sk.path(my_pos, pos);
+                let abs_dist = pos.distance(my_pos);
+                if obstructed {
+                    path.pop();
+                    path.pop();
+                    if let Some(path_pos) = path.pop() {
+                        pos = path_pos;
+                    }
+                }
+                let dir = (pos - my_pos).normalize_or_zero();
                 let angle_amt = my_facing.angle_between(dir);
 
                 gizmos.circle_2d(pos, 10.0, Color::RED);
@@ -150,11 +200,51 @@ pub fn decide(
                         action: M(Movement::Rotate(dir)),
                     });
                 }
-                if dist > body.lin_margin() {
+                if abs_dist > body.lin_margin() {
                     stage_1.send(S1 {
                         id: e,
                         action: M(Movement::Move(pos)),
                     });
+                } else {
+                    stage_1.send(S1 {
+                        id: e,
+                        action: Action::None,
+                    });
+                }
+            }
+        }
+    }
+}
+
+#[derive(Event)]
+pub struct S2 {
+    pub id: Entity,
+    pub action: A2,
+}
+
+pub enum A2 {
+    Tag(Entity),
+}
+
+pub fn handle_s2(
+    mut rdr: EventReader<S2>,
+    tags: Query<(&Tag, &Transform)>,
+    mut stage_3: EventWriter<S3>
+) {
+    for e in rdr.iter() {
+        match e.action {
+            A2::Tag(target) => {
+                if let Ok((tag, tf)) = tags.get(target) {
+                    stage_3.send(S3 {
+                        id: e.id,
+                        event: A3::GainInfo {
+                            about: target,
+                            info: tag.kind,
+                            pos: tf.translation.truncate(),
+                        },
+                    });
+                } else {
+                    warn!("Entity without a tag");
                 }
             }
         }
@@ -169,7 +259,8 @@ pub fn handle_s1(
     time: Res<Time>,
     rc: Res<RapierContext>,
     mut commands: Commands,
-    ga: Res<GeneratedAssets>
+    ga: Res<GeneratedAssets>,
+    mut stage_2: EventWriter<S2>
 ) {
     for e in rdr.iter() {
         if let Ok((tf, mut vel, body, mut stamina, mut goal, mut sk, vision)) = q.get_mut(e.id) {
@@ -178,6 +269,12 @@ pub fn handle_s1(
 
             use Action::*;
             match e.action {
+                None => {
+                    goal.mission = Missions::None;
+                }
+                PruneVision => {
+                    sk.clear_seen();
+                }
                 M(Movement::Rotate(dir)) => {
                     let amt = my_facing.angle_between(dir) / PI;
                     if stamina.energy > 0.1 {
@@ -205,7 +302,7 @@ pub fn handle_s1(
                 SpawnChild => {
                     let spawn_pos = my_pos + my_facing * body.radius * 2.01;
 
-                    if spawn(RADIUS, spawn_pos, None, &rc) {
+                    if spawn(RADIUS, spawn_pos, std::option::Option::None, &rc) {
                         Agent::spawn(
                             spawn_pos,
                             my_facing.rotate(Vec2::NEG_Y),
@@ -219,6 +316,15 @@ pub fn handle_s1(
                 }
                 ProcessVision => {
                     sk.report(&vision.seeing);
+                    for (entity, _pos) in vision.seeing.iter() {
+                        if !sk.queried(entity) {
+                            stage_2.send(S2 {
+                                id: e.id,
+                                action: A2::Tag(*entity),
+                            });
+                            sk.query_in_progress(*entity);
+                        }
+                    }
                 }
             };
         } else {

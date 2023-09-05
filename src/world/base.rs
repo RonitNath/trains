@@ -1,6 +1,6 @@
 use crate::{ prelude::*, logic::body::BodyBundle };
 
-use super::{ assets::GeneratedAssets, Tag };
+use super::{ assets::{ GeneratedAssets, init_assets }, Tag };
 
 pub struct BasePlugin;
 
@@ -12,6 +12,23 @@ impl Plugin for BasePlugin {
 
 #[derive(Component)]
 pub struct Base;
+
+#[derive(Bundle)]
+pub struct BaseBundle {
+    pub base: Base,
+    pub tag: Tag,
+    pub density: ColliderMassProperties,
+}
+
+impl BaseBundle {
+    pub fn new() -> Self {
+        Self {
+            base: Base,
+            tag: Tag::base(),
+            density: ColliderMassProperties::Density(BASE_DENSITY),
+        }
+    }
+}
 
 impl Base {
     pub fn spawn(
@@ -36,8 +53,7 @@ impl Base {
 
         commands
             .entity(body)
-            .insert(Base)
-            .insert(Tag::base())
+            .insert(BaseBundle::new())
             .with_children(|parent| {
                 parent.spawn(Render {
                     material: amaterial.clone(),

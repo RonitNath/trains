@@ -2,6 +2,7 @@ use std::f32::consts::PI;
 
 pub const AGENT_INV_SIZE: usize = 4;
 pub const BASE_INV_SIZE: usize = 100;
+pub const BASE_DENSITY: f32 = 1000.0;
 
 pub const RADIUS: f32 = 50.0;
 pub const EYEBALL_SCALAR: f32 = 0.15;
